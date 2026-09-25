@@ -1,0 +1,66 @@
+﻿$ErrorActionPreference = 'Stop'
+
+$Version = '1.1.6'
+$Repo = 'Zayoooh1/ForzaPrep'
+$Asset = 'ForzaPrep_1.1.6.zip'
+$ExpectedSha256 = 'EB003E10D1C8BBBA3DED6470875CA40BB85C02155774D8F4B9A90898C89F65A2'
+
+$Url = "https://github.com/$Repo/releases/download/v$Version/$Asset"
+$Root = Join-Path $env:TEMP "ForzaPrep-$Version"
+$Zip = Join-Path $env:TEMP $Asset
+
+Write-Host ""
+Write-Host "ForzaPrep $Version" -ForegroundColor Cyan
+Write-Host "Downloading verified release..." -ForegroundColor Cyan
+
+Invoke-WebRequest -Uri $Url -OutFile $Zip -UseBasicParsing
+
+$ActualSha256 = (Get-FileHash -LiteralPath $Zip -Algorithm SHA256).Hash.ToUpperInvariant()
+
+if ($ActualSha256 -ne $ExpectedSha256) {
+    Remove-Item -LiteralPath $Zip -Force -ErrorAction SilentlyContinue
+    throw "ForzaPrep SHA-256 verification failed. Expected $ExpectedSha256, got $ActualSha256."
+}
+
+Write-Host "SHA-256 verified." -ForegroundColor Green
+
+if (Test-Path -LiteralPath $Root) {
+    Remove-Item -LiteralPath $Root -Recurse -Force
+}
+
+New-Item -ItemType Directory -Path $Root -Force | Out-Null
+Expand-Archive -LiteralPath $Zip -DestinationPath $Root -Force
+
+$Script = Get-ChildItem -LiteralPath $Root -Recurse -File -Filter 'Prepare-ForzaPC.ps1' |
+    Select-Object -First 1
+
+if (-not $Script) {
+    throw 'Prepare-ForzaPC.ps1 was not found in the verified archive.'
+}
+
+Remove-Item -LiteralPath $Zip -Force -ErrorAction SilentlyContinue
+
+$principal = New-Object Security.Principal.WindowsPrincipal(
+    [Security.Principal.WindowsIdentity]::GetCurrent()
+)
+
+$isAdmin = $principal.IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator
+)
+
+Write-Host "Starting ForzaPrep..." -ForegroundColor Green
+
+if ($isAdmin) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Script.FullName
+}
+else {
+    $args = @(
+        '-NoProfile'
+        '-ExecutionPolicy'
+        'Bypass'
+        '-File'
+        ('"{0}"' -f $Script.FullName)
+    ) -join ' '
+
+    Start-Process powershell.exe -Verb RunAs -ArgumentList $args -Wait
+}
